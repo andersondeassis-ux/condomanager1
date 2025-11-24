@@ -9,25 +9,31 @@ if (apiKey) {
   ai = new GoogleGenAI({ apiKey });
 }
 
-export const generateFinancialReport = async (transactions: Transaction[]): Promise<string> => {
+export const generateFinancialReport = async (transactions: Transaction[], periodContext: string = 'Período Recente'): Promise<string> => {
   if (!ai) return "A Chave da API está ausente. Por favor, configure o ambiente.";
 
-  const recentTransactions = transactions.slice(-20); // Analyze last 20 for context
-  const summary = JSON.stringify(recentTransactions);
+  // Aumentamos o contexto para 40 transações para ter mais precisão em períodos maiores
+  // Em um app real, idealmente enviaríamos um resumo agregado (soma por categorias) para economizar tokens
+  const analyzedTransactions = transactions.slice(-40); 
+  const summary = JSON.stringify(analyzedTransactions);
 
   const prompt = `
     Você é um consultor financeiro especialista para administração de condomínios.
-    Analise os seguintes dados JSON representando transações recentes do condomínio (receitas e despesas).
+    
+    CONTEXTO DA ANÁLISE: ${periodContext}
+    
+    Analise os seguintes dados JSON representando as transações financeiras (receitas e despesas) deste período.
+    Nota: Se houver muitas transações, esta é uma amostra das mais recentes/relevantes.
     
     Dados: ${summary}
 
     Por favor, forneça um relatório conciso em formato Markdown (em Português do Brasil) incluindo:
-    1. **Diagnóstico Financeiro**: O condomínio está economizando ou gastando demais?
-    2. **Anomalias de Gastos**: Aponte quaisquer despesas incomumente altas ou padrões irregulares.
-    3. **Oportunidades de Economia**: Sugira 2-3 maneiras práticas de reduzir custos com base nas categorias mostradas (ex: Manutenção, Água, Energia).
-    4. **Minuta de Comunicado**: Escreva um parágrafo curto e educado para os moradores resumindo o status financeiro do mês atual.
+    1. **Resumo do Período**: O saldo do período foi positivo ou negativo? (${periodContext})
+    2. **Anomalias e Destaques**: Aponte gastos elevados ou receitas atípicas neste período específico.
+    3. **Sugestões de Ação**: 2 conselhos práticos baseados nestes números.
+    4. **Minuta para Moradores**: Um parágrafo curto comunicando a situação deste período específico.
 
-    Mantenha o tom profissional, mas acessível. Responda em Português.
+    Mantenha o tom profissional, direto e em Português.
   `;
 
   try {
