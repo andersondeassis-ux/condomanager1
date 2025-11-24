@@ -11,10 +11,11 @@ import {
   Cell,
   AreaChart,
   Area,
-  CartesianGrid
+  CartesianGrid,
+  Legend
 } from 'recharts';
 import { Transaction } from '../types';
-import { TrendingUp, TrendingDown, DollarSign, Activity, CheckCircle2, AlertCircle, Zap, Droplets, CalendarClock, AlertTriangle, PiggyBank, Wallet } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, CheckCircle2, AlertCircle, Zap, Droplets, CalendarClock, AlertTriangle, PiggyBank, Wallet, ArrowRight, Users } from 'lucide-react';
 
 interface DashboardProps {
   transactions: Transaction[];
@@ -273,6 +274,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ transactions, userEmail })
     return { billStatus, hasOverdue, hasLatePayment, allPaid };
   }, [transactions, availableMonths, currentMonthStr, currentDay]);
 
+  // Lógica do WhatsApp (Lembrete)
+  const isReminderDay = useMemo(() => {
+    return currentDay >= 7 && currentDay <= 9;
+  }, [currentDay]);
+
+  const sendWhatsAppReminder = () => {
+    const phone = "5551981317973";
+    const text = "Olá Anderson! Lembrete automático: Os pagamentos mensais do condomínio vencem em breve (Dia 10). Por favor, verifique os lançamentos.";
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank');
+  };
+
   const chartData = useMemo(() => {
     const map: Record<string, { month: string, income: number, expense: number }> = {};
     
@@ -286,14 +299,70 @@ export const Dashboard: React.FC<DashboardProps> = ({ transactions, userEmail })
       if (!map[key]) {
         map[key] = { month: displayKey, income: 0, expense: 0 };
       }
-      if (t.type === 'income') map[key].income += t.amount;
-      else map[key].expense += t.amount;
+      
+      if (t.type === 'income') {
+        // Filtrar Fundo de Investimento para mostrar apenas Receita Operacional
+        const isFund = t.category === 'Fundo de Investimento' || t.desc.toLowerCase().includes('fundo');
+        if (!isFund) {
+            map[key].income += t.amount;
+        }
+      } else {
+        map[key].expense += t.amount;
+      }
     });
 
     // Sort by YYYY-MM key but return the values with displayKey
     return Object.entries(map)
       .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
       .map(([_, val]) => val);
+  }, [transactions]);
+
+  // --- Novo: Dados para Custo Por Casa (Rateio) ---
+  const costPerUnitData = useMemo(() => {
+    const map: Record<string, number> = {};
+    transactions.forEach(t => {
+      if (t.type === 'expense') {
+        const date = new Date(t.date);
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        map[key] = (map[key] || 0) + t.amount;
+      }
+    });
+
+    return Object.entries(map)
+      .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
+      .map(([key, totalExpense]) => {
+        const [year, month] = key.split('-');
+        return {
+          month: `${month}/${year.slice(2)}`,
+          cost: totalExpense / 3 // Divide por 3 casas
+        };
+      });
+  }, [transactions]);
+
+  // --- Novo: Dados para Água vs Luz ---
+  const utilitiesData = useMemo(() => {
+    let water = 0;
+    let light = 0;
+
+    const waterKeywords = REQUIRED_BILLS.find(b => b.id === 'water')?.keywords || [];
+    const lightKeywords = REQUIRED_BILLS.find(b => b.id === 'light')?.keywords || [];
+
+    transactions.forEach(t => {
+      if (t.type === 'expense') {
+        const text = (t.category + ' ' + t.desc).toLowerCase();
+        
+        if (waterKeywords.some(k => text.includes(k))) {
+          water += t.amount;
+        } else if (lightKeywords.some(k => text.includes(k))) {
+          light += t.amount;
+        }
+      }
+    });
+
+    return [
+      { name: 'Água', value: water, color: '#0ea5e9' }, // Sky 500
+      { name: 'Luz', value: light, color: '#eab308' }   // Yellow 500
+    ].filter(i => i.value > 0);
   }, [transactions]);
 
   const categoryData = useMemo(() => {
@@ -329,6 +398,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ transactions, userEmail })
 
   return (
     <div className="space-y-6">
+      {/* WhatsApp Reminder Alert (Visible only to Admin on specific days) */}
+      {isAdmin && isReminderDay && (
+        <div className="bg-indigo-600 rounded-xl p-4 shadow-lg text-white flex items-center justify-between animate-in slide-in-from-top-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-white/20 rounded-lg">
+              <CalendarClock className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h3 className="font-bold">Lembrete Mensal</h3>
+              <p className="text-sm text-indigo-100">Hoje é dia de lembrar o gestor sobre os pagamentos.</p>
+            </div>
+          </div>
+          <button 
+            onClick={sendWhatsAppReminder}
+            className="px-4 py-2 bg-white text-indigo-700 font-bold rounded-lg hover:bg-indigo-50 transition-colors flex items-center gap-2"
+          >
+            Enviar WhatsApp
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Status Cards Grid - VISÍVEL APENAS PARA ADMIN */}
       {isAdmin && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-2">
@@ -507,8 +598,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ transactions, userEmail })
                   formatter={(value: number) => formatBRL(value)}
                   labelStyle={{ color: '#475569' }}
                 />
-                <Area type="monotone" dataKey="income" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorIncome)" name="Receita Total" />
-                <Area type="monotone" dataKey="expense" stroke="#ec4899" strokeWidth={2} fillOpacity={1} fill="url(#colorExpense)" name="Despesa" />
+                <Area type="monotone" dataKey="income" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorIncome)" name="Receita Operacional" />
+                <Area type="monotone" dataKey="expense" stroke="#ec4899" strokeWidth={2} fillOpacity={1} fill="url(#colorExpense)" name="Despesas Totais" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -554,6 +645,98 @@ export const Dashboard: React.FC<DashboardProps> = ({ transactions, userEmail })
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Seção Rateio e Utilidades */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* Custo por Casa (Rateio) */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+           <div className="flex justify-between items-start mb-4">
+             <div>
+               <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                 <Users className="w-5 h-5 text-indigo-500" />
+                 Rateio de Custos
+               </h3>
+               <p className="text-xs text-slate-500">Custo mensal por casa (Total / 3)</p>
+             </div>
+             <div className="text-right">
+               <span className="text-xs text-slate-400 block">Total Acumulado/Casa</span>
+               <span className="text-lg font-bold text-slate-800">{formatBRL(stats.expense / 3)}</span>
+             </div>
+           </div>
+           
+           <div className="h-[250px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={costPerUnitData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
+                <Tooltip 
+                  cursor={{fill: '#f1f5f9'}}
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  formatter={(value: number) => [formatBRL(value), 'Custo/Casa']}
+                />
+                <Bar dataKey="cost" fill="#6366f1" radius={[4, 4, 0, 0]} name="Custo por Casa" />
+              </BarChart>
+            </ResponsiveContainer>
+           </div>
+        </div>
+
+        {/* Comparativo Água x Luz */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <div className="flex items-center gap-2 mb-4">
+             <div className="p-1.5 bg-blue-50 rounded-lg">
+                <Droplets className="w-4 h-4 text-blue-500" />
+             </div>
+             <span className="text-slate-300">vs</span>
+             <div className="p-1.5 bg-amber-50 rounded-lg">
+                <Zap className="w-4 h-4 text-amber-500" />
+             </div>
+             <h3 className="text-lg font-semibold text-slate-800 ml-2">Utilidades (Água vs Luz)</h3>
+          </div>
+
+          <div className="flex flex-col md:flex-row items-center">
+             <div className="h-[250px] w-full md:w-1/2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={utilitiesData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {utilitiesData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '8px' }} 
+                      formatter={(value: number) => formatBRL(value)}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+             </div>
+             <div className="w-full md:w-1/2 space-y-4 mt-4 md:mt-0">
+                {utilitiesData.map((entry, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 rounded-lg border border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }}></div>
+                      <span className="text-sm text-slate-600 font-medium">{entry.name}</span>
+                    </div>
+                    <span className="text-sm font-bold text-slate-800">{formatBRL(entry.value)}</span>
+                  </div>
+                ))}
+                {utilitiesData.length === 0 && (
+                  <p className="text-center text-slate-400 text-sm italic">Nenhum lançamento de Água ou Luz identificado.</p>
+                )}
+             </div>
+          </div>
+        </div>
+
       </div>
     </div>
   );
